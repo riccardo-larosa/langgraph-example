@@ -1,6 +1,7 @@
 from functools import lru_cache
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
+
 from my_agent.utils.tools import tools
 from langgraph.prebuilt import ToolNode
 
@@ -29,13 +30,19 @@ def should_continue(state):
         return "continue"
 
 
-system_prompt = """Be a helpful assistant"""
-
 # Define the function that calls the model
 def call_model(state, config):
     messages = state["messages"]
-    messages = [{"role": "system", "content": system_prompt}] + messages
-    model_name = config.get('configurable', {}).get("model_name", "anthropic")
+    
+    sys_prompt = """
+        Agent that assists with user queries against API, things like querying information or creating resources.
+        Some user queries can be resolved in a single API call, particularly if we can find appropriate params from the OpenAPI spec; 
+        though some require several API calls. 
+        
+    """
+    
+    messages = [{"role": "system", "content": sys_prompt}] + messages
+    model_name = "openai"
     model = _get_model(model_name)
     response = model.invoke(messages)
     # We return a list, because this will get added to the existing list
@@ -43,3 +50,4 @@ def call_model(state, config):
 
 # Define the function to execute tools
 tool_node = ToolNode(tools)
+

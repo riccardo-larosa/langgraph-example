@@ -1,90 +1,80 @@
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_core.tools import tool
-import requests, yaml, re
-from langchain_community.agent_toolkits.openapi.spec import reduce_openapi_spec, ReducedOpenAPISpec
+import requests
+from my_agent.utils.utils import find_match_for_endpoint, get_OpenAPI_spec_for_endpoint
+
+#TODO: we should probably have a class for these
+def get_baseurl():
+    return "https://useast.api.elasticpath.com"
+
+def create_headers(token: str) -> dict:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    return headers
 
 @tool
-def exec_get_request(baseurl: str, endpoint: str, headers: dict = None, params: dict = None):
+def exec_get_request( endpoint: str, token: str, params: dict = None, baseurl=get_baseurl()):
     """
     Executes a GET request to the specified endpoint.
     """
-    response = requests.get(baseurl + endpoint, headers=headers, params=params)
+    response = requests.get(baseurl + endpoint, headers=create_headers(token), params=params)
+    print(requests)
     response.raise_for_status()
-    #json = { "data": [{"id": 1, "name": "John Doe"}, {"id": 2, "name": "Jenny Lee"}] }
+    
     return response.json()
     
 @tool
-def exec_post_request(baseurl: str, endpoint: str, headers: dict = None, data: dict = None):
+def exec_post_request( endpoint: str, token: str, body: dict = None, baseurl=get_baseurl()):
     """
     Executes a POST request to the specified endpoint.
     """
-    response = requests.post(baseurl + endpoint, headers=headers, json=data)
+    response = requests.post(baseurl + endpoint, headers=create_headers(token), json=body)
     response.raise_for_status()
     return response.json()
 
 @tool
-def exec_put_request(baseurl: str, endpoint: str, headers: dict = None, data: dict = None):
+def exec_put_request( endpoint: str, token: str, body: dict = None, baseurl=get_baseurl()):
     """
     Executes a PUT request to the specified endpoint.
     """
-    response = requests.put(baseurl + endpoint, headers=headers, json=data)
+    response = requests.put(baseurl + endpoint, headers=create_headers(token), json=body)
     response.raise_for_status()
     return response.json()
 
-@tool
-def get_API_names_description():
-    """
-    Returns a list of API names and descriptions.
-    """
-    #url = "https://raw.githubusercontent.com/elasticpath/elasticpath-dev/main/openapispecs/catalog/catalog_view.yaml"
-    url = "https://raw.githubusercontent.com/elasticpath/elasticpath-dev/main/openapispecs/pim/pim.yaml"
-    response = requests.get(url)
-    if response.status_code == 200:
-        raw_openapi_spec = yaml.safe_load(response.text)
-    else:
-        raise ValueError(f"Failed to fetch OpenAPI spec: {response.text}")
 
-    #with open("./openapispecs/catalog/catalog_view.yaml") as f:
-    #    raw_openapi_spec = yaml.load(f, Loader=yaml.Loader)
-    openapi_spec = reduce_openapi_spec(raw_openapi_spec, dereference=False)
-    endpoint_descriptions = [
-        f"{name} {description[:1000]}" if description is not None else "aaa" for name, description, _ in openapi_spec.endpoints
-    ]
-    endpoints =  "\n ".join(endpoint_descriptions)
+@tool
+def get_API_spec(text):
+    """
+    Given a text string in the form of an action, returns the current api spec that will be used to execute the action.
+    For instance if the text is "list all the nodes", the API spec for listing all the nodes will be returned.
+    The API spec will look something like this:
+    == Docs for GET /pcm/hierarchies/{hierarchyID}/nodes == 
+        description: A fully paginated view of all nodes in a hierarchy regardless of depth.
+        parameters:
+        - description: A unique identifier for the hierarchy.
+            in: path
+            name: hierarchyID
+            required: true
+            schema:
+        responses:
+            content:
+                application/json:
+
+    """
+    #find the appropriate API endpoint 
+    api_endpoint = find_match_for_endpoint(text)
+    #get the full API spec for this endpoint
+    api_spec = get_OpenAPI_spec_for_endpoint(api_endpoint)
     
-    return endpoint_descriptions
+    return api_spec
 
-@tool
-def get_API_spec_for_endpoint(endpoint: str):
-    """
-    Returns the OpenAPI spec for the specified endpoint.
-    """
-    #url = "https://raw.githubusercontent.com/elasticpath/elasticpath-dev/main/openapispecs/catalog/catalog_view.yaml"
-    url = "https://raw.githubusercontent.com/elasticpath/elasticpath-dev/main/openapispecs/pim/pim.yaml"
-    response = requests.get(url)
-    if response.status_code == 200:
-        raw_openapi_spec = yaml.safe_load(response.text)
 
-    openapi_spec = reduce_openapi_spec(raw_openapi_spec, dereference=False)
-    pattern = r"\b(GET|POST|PATCH|DELETE|PUT)\s+(/\S+)*"
-    matches = re.findall(pattern, endpoint)
-    endpoint_names = [
-        "{method} {route}".format(method=method, route=route.split("?")[0])
-        for method, route in matches
-    ]
-    docs_str = ""
-    for endpoint_name in endpoint_names:
-        found_match = False
-        for name, _, docs in openapi_spec.endpoints:
-            regex_name = re.compile(re.sub(r"\{.*?\}", ".*", name))
-            if regex_name.match(endpoint_name):
-                found_match = True
-                docs_str += f"== Docs for {endpoint_name} == \n{yaml.dump(docs)}\n"
-        if not found_match:
-            raise ValueError(f"{endpoint_name} endpoint does not exist.")
-
-tools = [TavilySearchResults(max_results=1), 
+tools = [
          exec_get_request, 
          exec_post_request, 
          exec_put_request,
-        get_API_names_description]
+         get_API_spec]
+
+#TavilySearchResults(max_results=1), 
